@@ -1,5 +1,6 @@
 import os
 from os import path as op
+from Crypto.Cipher import AES
 
 try:
     import ujson as json
@@ -10,41 +11,69 @@ from inspect import ismethod
 
 __all__ = ['Config']
 
-DEFAULT_NAME = "configuration"
-CONFIG_ENV = "APP_CONFIGFILE"
+DEFAULT_NAME = "unknown"
 
 
-class Config(object):
-    extension = 'json'
+class JSONType(type):
+    context = dict()
+
+    def __new__(cls, name, bases, attrs):
+        cls.context[name] = {
+            'path': os.environ.get(attrs.pop('CONTAINER', ''), ''),
+            'filename': attrs.pop('FILENAME', DEFAULT_NAME),
+        }
+        target = super(JSONType, cls).__new__(cls, name, bases, attrs)
+        return target
+
+    def set_properties(cls, **kwargs):
+        [setattr(cls, k, v) for k, v in kwargs.items()]
+        cls._properties = property(lambda self: tuple(kwargs.keys()))
+        return cls
+
+    @property
+    def extension(cls):
+        return 'json'
+
+    @property
+    def container(cls):
+        env = cls.context.get(cls.__name__, dict())
+        rules = (
+            '{}',
+            '{{}}.{}'.format(cls.extension),
+            '{}.{}'.format(env.get('filename', DEFAULT_NAME), cls.extension),
+
+            '../data/{{}}',
+            '../data/{{}}.{}'.format(cls.extension),
+            '../data/{}.{}'.format(env.get('filename', DEFAULT_NAME), cls.extension)
+        )
+
+        for rule in rules:
+            configpath = rule.format(env.get('path', ''))
+            if op.isfile(op.abspath(configpath)):
+                return configpath
+
+        raise FileNotFoundError("Can't find container file")
+
+
+class Config(metaclass=JSONType):
+    CONTAINER = "APP_CONFIG_FILE"
+    FILENAME = "configuration"
 
     def __new__(cls, uppercase=None, section=None):
-        config = cls.find_config()
         uppercase = uppercase if isinstance(uppercase, bool) else False
-        properties = {
-            '_baseclass': property(lambda self: cls),
-            'section': property(lambda self: section),
-            'uppercase': property(lambda self: uppercase),
-            'config': property(lambda self: config),
-            'extension': property(lambda self: cls.extension)
-        }
-        properties.update({'_exclude_attr': property(lambda self: tuple(properties.keys()))})
-        Config = type("Config", (cls, ), properties)
-        obj = super(cls, Config).__new__(Config)
+        obj = object.__new__(cls.set_properties(uppercase=uppercase, section=section, configfile=cls.container))
         obj.reload()
         return obj
 
     def reload(self):
-        if self.config.find('\n') == -1:
-            with open(self.config, 'r') as f:
-                cfg = json.load(f)
-        else:
-            cfg = json.load(self.config)
+        with open(self.configfile, 'r') as f:
+            cfg = json.load(f)
 
-        if self.section is not None:
+        if self.section:
             for subsection in self.section.split('.'):
                 cfg = cfg.get(subsection, dict())
             if not cfg:
-                raise ConfigError("Can't find section '{}' in file".format(self.section))
+                raise ValueError("Can't find section '{}' in file".format(self.section))
 
         if isinstance(cfg, dict):
             [setattr(self, self.case(k), v) for k, v in cfg.items()]
@@ -60,7 +89,7 @@ class Config(object):
 
         if ismethod(getattr(self, item)):
             return False
-        if item in self._exclude_attr:
+        if item in self._properties:
             return False
         if item.find('_', 0) == 0:
             return False
@@ -79,31 +108,41 @@ class Config(object):
         if not isinstance(section, str):
             return self
 
-        if self.section is not None:
-            section = ".".join([self.section, section])
-
         uppercase = uppercase if isinstance(uppercase, bool) else self.uppercase
-
-        return self._baseclass(section=section, uppercase=uppercase)
-
-    @classmethod
-    def find_config(cls):
-        rules = (
-            '{{}}',
-            '{{}}.{}'.format(cls.extension),
-            '{}.{}'.format(DEFAULT_NAME, cls.extension),
-
-            '../data/{{}}',
-            '../data/{{}}.{}'.format(cls.extension),
-            '../data/{}.{}'.format(DEFAULT_NAME, cls.extension)
-        )
-        for rule in rules:
-            configpath = rule.format(os.environ.get('MBA_CONFIGFILE', ''))
-            if op.exists(configpath):
-                return configpath
-
-        raise ConfigError("Can't find config")
+        return type(self).__new__(type(self), section=section, uppercase=uppercase)
 
 
-class ConfigError(Exception):
-    pass
+class CryptoContainer(metaclass=JSONType):
+    CONTAINER = "APP_CRYPTO_FILE"
+    FILENAME = "vault"
+
+    key = None
+
+    def __new__(cls, key=None):
+        key = key if isinstance(key, str) else cls.key
+
+        if not isinstance(key, str):
+            raise ValueError(f'Bad key value: {key}')
+
+        try:
+            cryptofile = cls.container
+        except FileNotFoundError:
+            ctx = cls.context[cls.__name__]
+            if ctx.get('path'):
+                cryptofile = ctx.get('path')
+            else:
+                cryptofile = op.join('.', f"{ctx.get('filename')}.{cls.extension}")
+
+        obj = object.__new__(cls.set_properties(cryptofile=cryptofile))
+        obj.key = property(lambda self: key)
+        return obj
+
+    def create(self):
+        if op.isfile(self.cryptofile):
+            return
+
+        folder = op.dirname(op.abspath(self.cryptofile))
+        if not op.isdir(folder):
+            os.makedirs(folder)
+
+        return open(self.cryptofile, 'w').close()
