@@ -3,10 +3,7 @@ from os import path as op
 from Crypto import Random
 from Crypto.Cipher import AES
 
-try:
-    import ujson as json
-except ImportError:
-    import json
+import json5 as json
 
 from inspect import ismethod
 
