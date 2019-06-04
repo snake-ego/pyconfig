@@ -43,7 +43,7 @@ def get_readme(fname):
 setup(
     version=extract('version', '{}/__init__.py'.format(NAME)),
     description=extract('doc', '{}/__init__.py'.format(NAME)),
-    long_description=get_readme('README.md'),
+    long_description=get_readme('README.rst'),
     install_requires=[],
     packages=PACKAGES,
     scripts=SCRIPTS,
