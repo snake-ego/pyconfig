@@ -44,7 +44,7 @@ setup(
     version=extract('version', '{}/__init__.py'.format(NAME)),
     description=extract('doc', '{}/__init__.py'.format(NAME)),
     long_description=get_readme('README.rst'),
-    install_requires=[],
+    install_requires=open('requirements.txt').read(),
     packages=PACKAGES,
     scripts=SCRIPTS,
     data_files=DATA_FILES,

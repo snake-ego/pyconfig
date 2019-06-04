@@ -2,10 +2,7 @@ import typing as t
 import os
 from os import path as op
 
-try:
-    import ujson as json
-except ImportError:
-    import json      # type: ignore
+import json5 as json
 
 from inspect import ismethod
 
@@ -77,6 +74,7 @@ class Config(Attributes, metaclass=JSONType):
     def __new__(cls, uppercase=None, section=None):
         uppercase = uppercase if isinstance(uppercase, bool) else False
         obj = object.__new__(cls.set_properties(uppercase=uppercase, section=section, configfile=cls.container))
+        obj.uppercase = uppercase
         obj.reload()
         return obj
 
