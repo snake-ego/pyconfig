@@ -1,12 +1,11 @@
+import typing as t
 import os
 from os import path as op
-from Crypto import Random
-from Crypto.Cipher import AES
 
 try:
     import ujson as json
 except ImportError:
-    import json
+    import json      # type: ignore
 
 from inspect import ismethod
 
@@ -16,7 +15,7 @@ DEFAULT_NAME = "unknown"
 
 
 class JSONType(type):
-    context = dict()
+    context: t.Dict[str, t.Any] = dict()
 
     def __new__(cls, name, bases, attrs):
         cls.context[name] = {
@@ -110,64 +109,3 @@ class Config(Attributes, metaclass=JSONType):
     def _skipped(self, item, prefix=None):
         prefix = '' if prefix is None else self.convert_case(prefix)
         return super(type(self), self)._skipped(item, prefix)
-
-
-class CryptoContainer(Attributes, metaclass=JSONType):
-    CONTAINER = "APP_CRYPTO_FILE"
-    FILENAME = "vault"
-
-    key = None
-    splitter = b";"
-
-    def __new__(cls, key=None):
-        key = key if isinstance(key, str) else cls.key
-
-        if not isinstance(key, str):
-            raise ValueError(f'Bad key value: {key}')
-
-        if len(key) != 32:
-            raise ValueError(f'Key must have 32 symbols')
-
-        try:
-            cryptofile = cls.container
-        except FileNotFoundError:
-            ctx = cls.context[cls.__name__]
-            if ctx.get('path'):
-                cryptofile = ctx.get('path')
-            else:
-                cryptofile = op.join('.', f"{ctx.get('filename')}.{cls.extension}")
-
-        obj = object.__new__(cls.set_properties(key=key, splitter=cls.splitter, cryptofile=cryptofile))
-        return obj
-
-    def create(self):
-        if op.isfile(self.cryptofile):
-            return
-
-        folder = op.dirname(op.abspath(self.cryptofile))
-        if not op.isdir(folder):
-            os.makedirs(folder)
-
-        return open(self.cryptofile, 'w').close()
-
-    def reload(self):
-        if not op.isfile(self.cryptofile):
-            raise FileNotFoundError(f"Can't find file: {self.cryptofile}. Need to call create first")
-
-        with open(self.cryptofile, 'rb') as f:
-            *_, iv = f.readline().strip().split(self.splitter)
-            aes = AES.new(self.key, AES.MODE_CFB, iv)
-            data = str(aes.decrypt(f.read()), 'utf-8')
-
-        [setattr(self, *i) for i in json.loads(data).items()]
-
-    def save(self):
-        data = json.dumps(self.all())
-
-        crypt = b"AES256"
-        iv = Random.new().read(AES.block_size)
-
-        aes = AES.new(self.key, AES.MODE_CFB, iv)
-        with open(self.cryptofile, 'wb') as f:
-            f.write(self.splitter.join([crypt, iv]) + b'\n')
-            f.write(aes.encrypt(data))
